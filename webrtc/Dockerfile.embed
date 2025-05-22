@@ -1,0 +1,77 @@
+FROM golang:1.21-alpine
+
+# Install build dependencies
+RUN apk add --no-cache git gcc musl-dev
+
+WORKDIR /app
+
+# Create directory structure
+RUN mkdir -p cmd/server
+
+# Create a simple Go file that includes all dependencies directly
+RUN echo 'package main
+
+import (
+	"flag"
+	"log"
+	"net/http"
+	"sync"
+
+	"github.com/gorilla/websocket"
+	"github.com/pion/webrtc/v3"
+)
+
+// Basic WebRTC signaling server
+func main() {
+	addr := flag.String("addr", ":8080", "http service address")
+	flag.Parse()
+
+	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		upgrader := websocket.Upgrader{
+			CheckOrigin: func(r *http.Request) bool { return true },
+		}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			log.Printf("Upgrade error: %v", err)
+			return
+		}
+		defer conn.Close()
+
+		log.Println("New WebSocket connection established")
+		log.Println("WebRTC version:", webrtc.Version)
+
+		// Keep connection open
+		for {
+			messageType, message, err := conn.ReadMessage()
+			if err != nil {
+				log.Println("Read error:", err)
+				break
+			}
+			log.Printf("Received message: %s", message)
+			
+			// Echo the message back
+			if err := conn.WriteMessage(messageType, message); err != nil {
+				log.Println("Write error:", err)
+				break
+			}
+		}
+	})
+
+	log.Printf("Starting WebRTC signaling server on %s", *addr)
+	log.Fatal(http.ListenAndServe(*addr, nil))
+}' > cmd/server/main.go
+
+# Initialize Go module and download dependencies
+RUN go mod init github.com/lulumarjan/webrtc
+RUN go get github.com/gorilla/websocket
+RUN go get github.com/pion/webrtc/v3
+RUN go mod tidy
+
+# Build the application
+RUN go build -o webrtc-server ./cmd/server
+
+# Expose port
+EXPOSE 8080
+
+# Run the application
+CMD ["./webrtc-server"]

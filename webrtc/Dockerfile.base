@@ -1,0 +1,20 @@
+FROM golang:1.21-alpine
+
+# Install git and build dependencies
+RUN apk add --no-cache git gcc musl-dev
+
+# Create app directory
+WORKDIR /app
+
+# Initialize Go module
+RUN go mod init github.com/lulumarjan/webrtc
+
+# Add direct dependencies
+RUN go get github.com/gorilla/websocket
+RUN go get github.com/pion/webrtc/v3
+
+# Copy Go module file for reference (this won't be used, but helps with documentation)
+COPY go.mod ./go.mod.ref
+
+# The base image is ready for application code
+# This will be used as a base for the final Dockerfile

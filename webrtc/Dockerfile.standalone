@@ -1,0 +1,38 @@
+FROM golang:1.21-alpine
+
+# Install git and build dependencies
+RUN apk add --no-cache git gcc musl-dev
+
+# Create app directory
+WORKDIR /app
+
+# Copy only go.mod and go.sum first (for better caching)
+COPY go.mod go.sum* ./
+
+# Download dependencies (this will work even if go.sum doesn't exist)
+RUN go mod download || true
+
+# Copy the rest of the source code
+COPY . .
+
+# Update dependencies and verify modules
+RUN go mod tidy
+RUN go get github.com/gorilla/websocket
+RUN go get github.com/pion/webrtc/v3
+
+# Display debug information
+RUN echo "Current directory contents:"
+RUN ls -la
+RUN echo "go.mod contents:"
+RUN cat go.mod
+RUN echo "Module status:"
+RUN go list -m all
+
+# Build the application
+RUN go build -o webrtc-server ./cmd/server || (echo "Build failed. Error details:" && ls -la && exit 1)
+
+# Expose port
+EXPOSE 8080
+
+# Run the application
+CMD ["./webrtc-server"]
