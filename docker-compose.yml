@@ -1,0 +1,113 @@
+version: '3.8'
+
+services:
+  webrtc:
+    build:
+      context: ./webrtc
+      dockerfile: Dockerfile.final
+    container_name: lulumarjan-webrtc
+    ports:
+      - "8080:8080"
+    networks:
+      - backend-network
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: lulumarjan-api
+    ports:
+      - "3000:3000"
+    networks:
+      - backend-network
+    depends_on:
+      - llm
+      - tts
+      - database
+    environment:
+      - NODE_ENV=production
+      - MONGODB_URI=mongodb://database:27017/lulumarjan
+      - LLM_SERVICE_URL=http://llm:5000
+      - TTS_SERVICE_URL=http://tts:6000
+      - WEBRTC_SERVICE_URL=http://webrtc:8080
+    volumes:
+      - ${VOICES_STORAGE_PATH:-./shared_storage/voices}:/app/uploads
+    restart: unless-stopped
+
+  llm:
+    build:
+      context: ./llm
+      dockerfile: Dockerfile.direct
+    container_name: lulumarjan-llm
+    networks:
+      - backend-network
+    environment:
+      - MODEL_ID=${MODEL_ID:-fixie-ai/ultravox-v0_5-llama-3_2-1b}
+      - HF_TOKEN=${HF_TOKEN}
+      - USE_4BIT=${USE_4BIT:-true}
+      - LOAD_IN_8BIT=${LOAD_IN_8BIT:-false}
+    volumes:
+      - ${MODELS_STORAGE_PATH:-./shared_storage/models}/llm:/root/.cache/huggingface
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  tts:
+    build:
+      context: ./tts
+      dockerfile: Dockerfile.direct
+    container_name: lulumarjan-tts
+    networks:
+      - backend-network
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - BASE_MODEL_PATH=/app/models/base_model
+      - SPEAKER_EMBEDDINGS_PATH=/app/models/speaker_embeddings
+      - CUSTOM_VOICES_PATH=/app/voices
+    volumes:
+      - ${MODELS_STORAGE_PATH:-./shared_storage/models}/tts:/app/models
+      - ${VOICES_STORAGE_PATH:-./shared_storage/voices}:/app/voices
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  database:
+    build:
+      context: ./database
+      dockerfile: Dockerfile.direct
+    container_name: lulumarjan-database
+    volumes:
+      - ${DATA_STORAGE_PATH:-./shared_storage/data}/mongodb:/data/db
+    networks:
+      - backend-network
+    restart: unless-stopped
+
+  client:
+    image: nginx:alpine
+    container_name: lulumarjan-client
+    ports:
+      - "8000:80"
+    volumes:
+      - ./client:/usr/share/nginx/html
+    depends_on:
+      - api
+      - webrtc
+    environment:
+      - API_URL=http://localhost:3000
+      - WEBRTC_WS_URL=ws://localhost:8080/ws
+    restart: unless-stopped
+
+networks:
+  backend-network:
+    driver: bridge

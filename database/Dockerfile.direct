@@ -1,0 +1,13 @@
+FROM mongo:7.0
+
+# Copy configuration file
+COPY mongod.conf /etc/mongod.conf
+
+# Set data directory
+VOLUME ["/data/db"]
+
+# Expose port
+EXPOSE 27017
+
+# Use the custom MongoDB configuration
+CMD ["mongod", "--config", "/etc/mongod.conf"]
