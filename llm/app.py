@@ -45,20 +45,58 @@ def load_model():
     
     logger.info(f"Loading model: {MODEL_ID}")
     logger.info(f"Device: {DEVICE}")
+    logger.info(f"8-bit quantization: {LOAD_IN_8BIT}")
+    logger.info(f"4-bit quantization: {USE_4BIT}")
+    
+    # Check if model exists locally
+    import os
+    from pathlib import Path
+    cache_dir = os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface"))
+    # Try both possible paths
+    model_path1 = Path(cache_dir) / f"models--{MODEL_ID.replace('/', '--')}"
+    model_path2 = Path(cache_dir) / "hub" / f"models--{MODEL_ID.replace('/', '--')}"
+    
+    if not model_path1.exists() and not model_path2.exists():
+        logger.error(f"Model not found in cache at {model_path1} or {model_path2}")
+        logger.error(f"Please download the model first using:")
+        logger.error(f"python -c \"from transformers import AutoModel, AutoProcessor; model_id='{MODEL_ID}'; AutoModel.from_pretrained(model_id, trust_remote_code=True); AutoProcessor.from_pretrained(model_id)\"")
+        raise FileNotFoundError(f"Model {MODEL_ID} not found in cache. Please download it first.")
+    
+    # Configure quantization
+    quantization_config = None
+    if USE_4BIT or LOAD_IN_8BIT:
+        quantization_config = BitsAndBytesConfig(
+            load_in_4bit=USE_4BIT,
+            load_in_8bit=LOAD_IN_8BIT,
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4"
+        )
     
     # Use pipeline for loading Ultravox model
     try:
-        model_pipeline = pipeline(
-            model=MODEL_ID,
-            device_map=DEVICE,
-            trust_remote_code=True,
-            torch_dtype=torch.bfloat16 if DEVICE == "cuda" else torch.float32,
-        )
+        if quantization_config:
+            model_pipeline = pipeline(
+                model=MODEL_ID,
+                device_map="auto",
+                trust_remote_code=True,
+                model_kwargs={"quantization_config": quantization_config, "local_files_only": True},
+                torch_dtype=torch.bfloat16 if DEVICE == "cuda" else torch.float32,
+                local_files_only=True,
+            )
+        else:
+            model_pipeline = pipeline(
+                model=MODEL_ID,
+                device_map=DEVICE,
+                trust_remote_code=True,
+                torch_dtype=torch.bfloat16 if DEVICE == "cuda" else torch.float32,
+                local_files_only=True,
+            )
         
         # Try to get the tokenizer from the pipeline
         tokenizer = model_pipeline.tokenizer
         
-        logger.info(f"Model loaded successfully")
+        logger.info(f"Model loaded successfully with {'8-bit' if LOAD_IN_8BIT else '4-bit' if USE_4BIT else 'full'} precision")
     except Exception as e:
         logger.error(f"Error loading model: {str(e)}")
         raise
@@ -173,3 +211,4 @@ if __name__ == '__main__':
     
     # Start the Flask app
     app.run(host='0.0.0.0', port=SERVE_PORT, debug=False)
+    logger.info(f"LLM service started on http://0.0.0.0:{SERVE_PORT}")

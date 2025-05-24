@@ -13,16 +13,20 @@ const multer = require('multer');
 const fs = require('fs');
 
 // Configure environment
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.API_PORT || process.env.PORT || 3000;
 const LLM_SERVICE_URL = process.env.LLM_SERVICE_URL || 'http://localhost:5000';
 const TTS_SERVICE_URL = process.env.TTS_SERVICE_URL || 'http://localhost:6000';
 const WEBRTC_SERVICE_URL = process.env.WEBRTC_SERVICE_URL || 'http://localhost:8080';
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ['*'];
 
 // Setup temporary storage for uploaded files
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
+
+// Path to client files
+const clientPath = path.join(__dirname, '..', 'client');
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, uploadDir);
@@ -38,17 +42,26 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: '*',
-    methods: ['GET', 'POST']
+    origin: ALLOWED_ORIGINS,
+    methods: ['GET', 'POST'],
+    credentials: true
   }
 });
 
 // Middleware
-app.use(helmet());
-app.use(cors());
+app.use(helmet({
+  crossOriginResourcePolicy: false,
+}));
+app.use(cors({
+  origin: ALLOWED_ORIGINS,
+  credentials: true
+}));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(morgan('dev'));
+
+// Serve static files from the client directory
+app.use(express.static(clientPath));
 
 // WebSocket/Socket.io for WebRTC signaling
 io.on('connection', (socket) => {
@@ -237,7 +250,14 @@ app.post('/webrtc/signal', async (req, res) => {
   }
 });
 
+// Catch-all route to serve index.html for client-side routing
+app.get('*', (req, res) => {
+  res.sendFile(path.join(clientPath, 'index.html'));
+});
+
 // Start server
-server.listen(PORT, () => {
-  console.log(`API server running on port ${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`API server running on http://0.0.0.0:${PORT}`);
+  console.log(`Web client available at http://0.0.0.0:${PORT}`);
+  console.log(`External access: http://${process.env.PUBLIC_IP || 'localhost'}:${PORT}`);
 });
